@@ -44,7 +44,7 @@ use regex::Regex;
 use tokio::{fs as async_fs, io::AsyncWriteExt, task::JoinHandle, time};
 use tokio_util::io::ReaderStream;
 
-use tracing::{debug, trace};
+use tracing::debug;
 
 use bs58;
 
@@ -208,7 +208,7 @@ fn compute_contribution(custom_seed: bool, challenge: &[u8], filename: &str) -> 
 
     println!("Computation of your contribution in progress...");
 
-    let writer = OpenOptions::new().append(true).open(filename)?;
+    let writer = OpenOptions::new().write(true).open(filename)?;
     Computation::contribute(challenge, writer, &rand_source).expect("Failed computation of contribution");
 
     println!(
@@ -324,20 +324,13 @@ async fn contribute(
 
     // Update contribution info
     println!("{} Updating contribution info", "[8/11]".bold().dimmed());
-    let contribution_file_hash = calculate_hash(contribution.as_ref());
-    let contribution_file_hash_str = hex::encode(contribution_file_hash);
-    debug!("Contribution hash is {}", contribution_file_hash_str);
-    debug!("Contribution length: {}", contribution.len());
-    contrib_info.contribution_file_hash = contribution_file_hash_str;
-    contrib_info.contribution_file_signature =
-        Production.sign(keypair.sigkey(), contrib_info.contribution_file_hash.as_str())?;
-    let challenge_hash_len = challenge_hash.len();
-    contrib_info.contribution_hash = hex::encode(calculate_hash(&contribution[challenge_hash_len..]));
+    let contribution_hash = calculate_hash(&contribution);
+    contrib_info.contribution_hash = hex::encode(contribution_hash);
     contrib_info.contribution_hash_signature =
         Production.sign(keypair.sigkey(), contrib_info.contribution_hash.as_str())?;
 
     // Send contribution to the coordinator
-    let contribution_state = ContributionState::new(challenge_hash.to_vec(), contribution_file_hash.to_vec(), None)?;
+    let contribution_state = ContributionState::new(challenge_hash.to_vec(), contribution_hash.to_vec(), None)?;
 
     let signature = Production.sign(keypair.sigkey(), &contribution_state.signature_message()?)?;
     let contribution_file_signature = ContributionFileSignature::new(signature, contribution_state)?;

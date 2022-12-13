@@ -129,9 +129,9 @@ impl Computation {
         Ok(())
     }
 
-    pub fn contribute(
+    pub fn contribute<W: Write>(
         challenge_reader: &[u8],
-        mut response_writer: &mut [u8],
+        response_writer: W,
         rand_source: &RandomSource,
     ) -> Result<(), CoordinatorError> {
         // Perform the transformation
