@@ -7,6 +7,7 @@ use crate::{
 };
 use phase2::helpers::CurveKind;
 
+use rand_chacha::ChaCha20Rng;
 use setup_utils::calculate_hash;
 
 use std::{io::Write, sync::Arc, time::Instant};
@@ -68,18 +69,23 @@ impl Computation {
         // Run computation on chunk.
         let settings = environment.parameters();
         let curve = settings.curve();
+        let rand_source = RandomSource::Entropy(String::from("entropy"));
+
         if let Err(error) = match curve {
             CurveKind::Bls12_381 => Self::contribute(
                 storage.reader(challenge_locator)?.as_ref(),
                 storage.writer(response_locator)?.as_mut(),
+                &rand_source,
             ),
             CurveKind::Bls12_377 => Self::contribute(
                 storage.reader(challenge_locator)?.as_ref(),
                 storage.writer(response_locator)?.as_mut(),
+                &rand_source,
             ),
             CurveKind::BW6 => Self::contribute(
                 storage.reader(challenge_locator)?.as_ref(),
                 storage.writer(response_locator)?.as_mut(),
+                &rand_source,
             ),
         } {
             error!("Computation failed with {}", error);
@@ -123,46 +129,14 @@ impl Computation {
         Ok(())
     }
 
-    fn contribute(challenge_reader: &[u8], mut response_writer: &mut [u8]) -> Result<(), CoordinatorError> {
-        trace!("Calculating previous contribution hash and writing it to the response");
-
-        let challenge_hash = calculate_hash(&challenge_reader);
-        debug!("Challenge hash is {}", pretty_hash!(&challenge_hash));
-
-        response_writer.write_all(&challenge_hash.as_slice())?;
-        response_writer.flush()?;
-
-        // The hash of the previous contribution is contained in the first 64 bytes of the current challenge file.
-        // The response writer is initialised empty, then the hash of the previous challenge is appended to it.
-        // The new contribution calculation should be appended after this hash.
-        let previous_hash = &challenge_reader
-            .get(0..64)
-            .ok_or(CoordinatorError::StorageReaderFailed)?;
-        debug!("Challenge file claims previous hash is {}", pretty_hash!(previous_hash));
-        debug!("Please double check this yourself! Do not trust it blindly!");
-
+    pub fn contribute(
+        challenge_reader: &[u8],
+        mut response_writer: &mut [u8],
+        rand_source: &RandomSource,
+    ) -> Result<(), CoordinatorError> {
         // Perform the transformation
         trace!("Computing and writing your contribution, this could take a while");
 
-        // Contribute to the MASP circuit
-        let rand_source = RandomSource::Entropy(String::from("entropy"));
-        #[cfg(debug_assertions)]
-        Self::contribute_test_masp(&challenge_reader, &mut response_writer, &rand_source);
-
-        #[cfg(not(debug_assertions))]
-        Self::contribute_masp(&challenge_reader, &mut response_writer, &rand_source);
-
-        trace!("Finishing writing your contribution to response file");
-
-        Ok(())
-    }
-
-    // The [`ContributionFile`] has the following format
-    // | previous_contribution_file_hash (64 bytes) |
-    // | masp_mpc_new_parameters_contribution |
-    // The masp-mpc commands are executed at offset 64 of the [`ContributionFile`]
-    #[cfg(not(debug_assertions))]
-    pub fn contribute_masp<W: Write>(challenge_reader: &[u8], mut response_writer: W, rand_source: &RandomSource) {
         // Create an RNG as following:
         //  - if the user provides a seed, create the rng from that seed
         //  - if the user provides entropy, create the rng from the combination of OS randomness and user entropy
@@ -186,24 +160,36 @@ impl Computation {
                     h.update(e.as_bytes());
                     let digest = h.finalize();
 
-                    ChaChaRng::from_seed(digest[0..32].try_into().unwrap())
+                    ChaChaRng::from_seed(digest[..32].try_into().unwrap())
                 }
                 RandomSource::Seed(s) => ChaChaRng::from_seed(*s),
             }
         };
 
-        let mut masp_challenge_reader = &challenge_reader[64..];
+        // Contribute to the MASP circuit
+        #[cfg(debug_assertions)]
+        Self::contribute_test_masp(challenge_reader, response_writer, &mut rng);
+
+        #[cfg(not(debug_assertions))]
+        Self::contribute_masp(challenge_reader, response_writer, &mut rng);
+
+        trace!("Finishing writing your contribution to response file");
+
+        Ok(())
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn contribute_masp<W: Write>(challenge_reader: &[u8], mut response_writer: W, rng: &mut ChaCha20Rng) {
         //
         // MASP Spend circuit
         //
         trace!("Reading MASP Spend...");
-        let mut spend_params =
-            MPCParameters::read(&mut masp_challenge_reader, false).expect("unable to read MASP Spend params");
+        let mut spend_params = MPCParameters::read(challenge_reader, false).expect("unable to read MASP Spend params");
 
         trace!("Contributing to MASP Spend...");
         let progress_update_interval: u32 = 0;
 
-        let spend_hash = spend_params.contribute(&mut rng, &progress_update_interval);
+        let spend_hash = spend_params.contribute(rng, &progress_update_interval);
         debug!("MASP Spend hash is {}", pretty_hash!(&spend_hash));
         trace!("Contributed to MASP Spend!");
 
@@ -212,12 +198,12 @@ impl Computation {
         //
         trace!("Reading MASP Output...");
         let mut output_params =
-            MPCParameters::read(&mut masp_challenge_reader, false).expect("unable to read MASP Output params");
+            MPCParameters::read(challenge_reader, false).expect("unable to read MASP Output params");
 
         trace!("Contributing to MASP Output...");
         let progress_update_interval: u32 = 0;
 
-        let output_hash = output_params.contribute(&mut rng, &progress_update_interval);
+        let output_hash = output_params.contribute(rng, &progress_update_interval);
         debug!("MASP Output hash is {}", pretty_hash!(&output_hash));
         trace!("Contributed to MASP Output!");
 
@@ -226,11 +212,11 @@ impl Computation {
         //
         trace!("Reading MASP Convert...");
         let mut convert_params =
-            MPCParameters::read(&mut masp_challenge_reader, false).expect("unable to read MASP Convert params");
+            MPCParameters::read(challenge_reader, false).expect("unable to read MASP Convert params");
 
         trace!("Contributing to MASP Convert...");
         let progress_update_interval: u32 = 0;
-        let convert_hash = convert_params.contribute(&mut rng, &progress_update_interval);
+        let convert_hash = convert_params.contribute(rng, &progress_update_interval);
         debug!("MASP Convert hash is {}", pretty_hash!(&convert_hash));
         trace!("Contributed to MASP Convert!");
 
@@ -262,43 +248,13 @@ impl Computation {
     }
 
     #[cfg(debug_assertions)]
-    pub fn contribute_test_masp<W: Write>(challenge_reader: &[u8], mut response_writer: W, rand_source: &RandomSource) {
-        // Create an RNG as following:
-        //  - if the user provides a seed, create the rng from that seed
-        //  - if the user provides entropy, create the rng from the combination of OS randomness and user entropy
-        let mut rng = {
-            use rand::{Rng, SeedableRng};
-            use rand_chacha::ChaChaRng;
-            use std::convert::TryInto;
-
-            match rand_source {
-                RandomSource::Entropy(e) => {
-                    let mut system_rng = rand::rngs::OsRng;
-                    let mut h = Blake2b512::new();
-
-                    // Gather 1024 bytes of entropy from the system
-                    for _ in 0..1024 {
-                        let r: u8 = system_rng.gen();
-                        h.update(&[r]);
-                    }
-
-                    // Hash it all up to make a seed
-                    h.update(e.as_bytes());
-                    let digest = h.finalize();
-
-                    ChaChaRng::from_seed(digest[0..32].try_into().unwrap())
-                }
-                RandomSource::Seed(s) => ChaChaRng::from_seed(*s),
-            }
-        };
-
-        let mut test_params =
-            MPCParameters::read(&challenge_reader[64..], false).expect("unable to read MASP Test params");
+    fn contribute_test_masp<W: Write>(challenge_reader: &[u8], mut response_writer: W, rng: &mut ChaCha20Rng) {
+        let mut test_params = MPCParameters::read(challenge_reader, false).expect("unable to read MASP Test params");
 
         trace!("Contributing to Masp Test...");
         let progress_update_interval: u32 = 0;
 
-        let test_hash = test_params.contribute(&mut rng, &progress_update_interval);
+        let test_hash = test_params.contribute(rng, &progress_update_interval);
 
         let mut h = Blake2b512::new();
         h.update(&test_hash);

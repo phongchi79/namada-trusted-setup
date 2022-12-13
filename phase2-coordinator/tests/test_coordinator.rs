@@ -733,7 +733,7 @@ fn contribution() {
     let mut contribution: Vec<u8> = Vec::new();
     contribution.write_all(challenge_hash.as_slice()).unwrap();
     let entropy = RandomSource::Entropy(String::from("entropy"));
-    Computation::contribute_test_masp(&challenge, &mut contribution, &entropy);
+    Computation::contribute(&challenge, &mut contribution, &entropy).unwrap();
 
     // Initial contribution size is 2332 but the Coordinator expect ANOMA_BASE_FILE_SIZE. Extend to this size with trailing 0s
     let contrib_size = Object::anoma_contribution_file_size(ROUND_HEIGHT, 1);

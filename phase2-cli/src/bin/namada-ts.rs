@@ -209,11 +209,7 @@ fn compute_contribution(custom_seed: bool, challenge: &[u8], filename: &str) -> 
     println!("Computation of your contribution in progress...");
 
     let writer = OpenOptions::new().append(true).open(filename)?;
-
-    #[cfg(debug_assertions)]
-    Computation::contribute_test_masp(challenge, writer, &rand_source);
-    #[cfg(not(debug_assertions))]
-    Computation::contribute_masp(challenge, writer, &rand_source);
+    Computation::contribute(challenge, writer, &rand_source).expect("Failed computation of contribution");
 
     println!(
         "{}",
@@ -285,8 +281,6 @@ async fn contribute(
             keypair.pubkey()
         ))
     };
-    let mut response_writer = async_fs::File::create(contrib_filename.as_str()).await?;
-    response_writer.write_all(challenge_hash.to_vec().as_ref()).await?;
 
     // Compute contribution
     println!("{} Computing contribution", "[7/11]".bold().dimmed());
@@ -318,7 +312,6 @@ async fn contribute(
     .await??;
 
     contrib_info.timestamps.end_computation = Utc::now();
-    trace!("Response writer {:?}", response_writer);
     println!(
         "{}",
         format!(
@@ -665,11 +658,15 @@ async fn contribution_prelude(url: CoordinatorUrl, token: String, branch: Branch
 
     // Check that the passed-in coordinator url is correct
     let client = Client::new();
-    if requests::ping_coordinator(&client, &url.coordinator)
-        .await.is_err() {
-            eprintln!("{}", "ERROR: could not contact the Coordinator, please check the url you provided".red().bold());
-            process::exit(1);
-        };
+    if requests::ping_coordinator(&client, &url.coordinator).await.is_err() {
+        eprintln!(
+            "{}",
+            "ERROR: could not contact the Coordinator, please check the url you provided"
+                .red()
+                .bold()
+        );
+        process::exit(1);
+    };
 
     println!("{}", ASCII_LOGO.bright_yellow());
     println!("{}", "Welcome to the Namada Trusted Setup Ceremony!".bold());
@@ -873,23 +870,28 @@ async fn main() {
             pubkey,
             message,
             signature,
-            parameter_path
+            parameter_path,
         }) => {
             if let Some(path) = parameter_path {
                 // Check hash of the parameters file
                 let contribution = std::fs::read(path).expect(&format!("{}", "Failed to read file".red().bold()));
-                let contribution_file_hash = calculate_hash(&contribution[64..]);
+                let contribution_file_hash = calculate_hash(&contribution);
                 if hex::encode(contribution_file_hash) != message {
-                    eprintln!("{}", "The computed hash of the file does not match the provided one".red().bold());
+                    eprintln!(
+                        "{}",
+                        "The computed hash of the file does not match the provided one"
+                            .red()
+                            .bold()
+                    );
                     process::exit(1);
                 }
             }
 
             let result = verify_signature(pubkey, signature, message);
             if result {
-                println!("The contribution signature is correct.")
+                println!("{}", "The contribution signature is correct.".green().bold())
             } else {
-                println!("The contribution signature is not correct.")
+                eprintln!("{}", "The contribution signature is not correct.".red().bold())
             }
         }
     }

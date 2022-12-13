@@ -90,10 +90,6 @@ pub struct ContributionInfo {
     pub contribution_hash: String,
     // Signature of the contribution hash
     pub contribution_hash_signature: String,
-    // Hash of the file saved on disk and sent to the coordinator
-    pub contribution_file_hash: String,
-    // Signature of the contribution
-    pub contribution_file_signature: String,
     /// Url providing an attestation of the contribution
     pub attestation: Option<String>,
     // Some timestamps to get performance metrics of the ceremony
@@ -177,8 +173,8 @@ impl From<ContributionInfo> for TrimmedContributionInfo {
             is_own_seed_of_randomness: parent.is_own_seed_of_randomness,
             joined_cohort: parent.joined_cohort,
             ceremony_round: parent.ceremony_round,
-            contribution_hash: parent.contribution_file_hash,
-            contribution_hash_signature: parent.contribution_file_signature,
+            contribution_hash: parent.contribution_hash,
+            contribution_hash_signature: parent.contribution_hash_signature,
             attestation: parent.attestation,
             timestamps: parent.timestamps.into(),
         }
@@ -227,8 +223,8 @@ mod tests {
         test_info.ceremony_round = 12;
         test_info.contribution_hash = String::from("Not a valid hash");
         test_info.contribution_hash_signature = String::from("Not a valid signature");
-        test_info.contribution_file_hash = String::from("Not a valid file hash");
-        test_info.contribution_file_signature = String::from("Not a valid file signature");
+        test_info.contribution_hash = String::from("Not a valid file hash");
+        test_info.contribution_hash_signature = String::from("Not a valid file signature");
 
         test_info.try_sign(&keypair).unwrap();
         assert!(test_info.verify_signature().unwrap());
