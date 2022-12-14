@@ -489,9 +489,11 @@ async fn contribution_loop(
                     .expect(&format!("{}", "Contribution failed".red().bold()));
             }
             ContributorStatus::Finished => {
-                let content = fs::read(&format!("namada_contributor_info_round_{}.json", round_height))
+                let contrib_info_file_name = format!("namada_contributor_info_round_{}.json", round_height);
+                let content = async_fs::read(&contrib_info_file_name)
+                    .await
                     .expect(&format!("{}", "Couldn't read the contributor info file".red().bold()));
-                let contrib_info: ContributionInfo = serde_json::from_slice(&content).unwrap();
+                let mut contrib_info: ContributionInfo = serde_json::from_slice(&content).unwrap();
 
                 println!("{}\n{}\n\nI've contributed to @namadanetwork #NamadaTrustedSetup at round #{} with the contribution hash {}. Let's enable #interchain privacy.\n\n{}",
                                                 "Done! Thank you for your contribution! If your contribution is valid, it will appear on ceremony.namada.net. Check it out!".green().bold(),
@@ -520,6 +522,12 @@ async fn contribution_loop(
                         )
                         .unwrap();
                         if Url::parse(attestation_url.as_str()).is_ok() {
+                            // Add attestation to local contribution info file
+                            contrib_info.attestation = Some(attestation_url.clone());
+                            async_fs::write(contrib_info_file_name, &serde_json::to_vec(&contrib_info).unwrap())
+                                .await
+                                .unwrap();
+
                             // Send attestation to coordinator
                             requests::post_attestation(
                                 &client,
