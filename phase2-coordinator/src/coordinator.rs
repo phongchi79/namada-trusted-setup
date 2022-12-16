@@ -1575,20 +1575,6 @@ impl Coordinator {
             debug!("Response is {}", pretty_hash!(&response_reader));
             info!("Response hash is {}", pretty_hash!(&response_hash.as_slice()));
 
-            // Fetch the challenge hash from the response file.
-            let challenge_hash_in_response = &response_reader
-                .get(0..64)
-                .ok_or(CoordinatorError::StorageReaderFailed)?[..];
-            let pretty_hash = pretty_hash!(&challenge_hash_in_response);
-
-            // Check the starting hash in the response file is based on the challenge.
-            info!("The challenge hash is {}", pretty_hash!(&challenge_hash.as_slice()));
-            info!("The challenge hash in response file is {}", pretty_hash);
-            if challenge_hash_in_response != challenge_hash.as_slice() {
-                error!("Challenge hash in response file does not match the expected challenge hash.");
-                return Err(CoordinatorError::ContributionHashMismatch);
-            }
-
             (challenge_hash, response_hash)
         };
 
@@ -1875,7 +1861,6 @@ impl Coordinator {
             }
         };
 
-        // Check the challenge-response hash chain.
         let (challenge_hash, response_hash) = {
             // Compute the challenge hash using the challenge file.
             let challenge_reader = self.storage.reader(&challenge_file_locator)?;
@@ -1895,24 +1880,9 @@ impl Coordinator {
             );
             info!("Response hash is {}", pretty_hash!(&response_hash.as_slice()));
 
-            // Fetch the challenge hash from the response file.
-            let challenge_hash_in_response = &response_reader
-                .get(0..64)
-                .ok_or(CoordinatorError::StorageReaderFailed)?[..];
-            let pretty_hash = pretty_hash!(&challenge_hash_in_response);
-
-            // Check the starting hash in the response file is based on the challenge.
-            info!("The challenge hash is {}", pretty_hash!(&challenge_hash.as_slice()));
-            info!("The challenge hash in response file is {}", pretty_hash);
-            if challenge_hash_in_response != challenge_hash.as_slice() {
-                error!("Challenge hash in response file does not match the expected challenge hash.");
-                return Err(CoordinatorError::ContributionHashMismatch);
-            }
-
             (challenge_hash, response_hash)
         };
 
-        // Check the response-next_challenge hash chain.
         let next_challenge_hash = {
             // Compute the next challenge hash.
             let next_challenge_reader = self.storage.reader(&next_challenge_locator)?;
@@ -1925,18 +1895,6 @@ impl Coordinator {
                 "Next challenge hash is {}",
                 pretty_hash!(&next_challenge_hash.as_slice())
             );
-
-            // Fetch the saved response hash in the next challenge file.
-            let saved_response_hash = next_challenge_reader.as_ref().chunks(64).next().unwrap().to_vec();
-            let pretty_hash = pretty_hash!(&saved_response_hash);
-
-            // Check that the response hash matches the next challenge hash.
-            info!("The response hash is {}", pretty_hash!(&response_hash));
-            info!("The response hash in next challenge file is {}", pretty_hash);
-            if response_hash.as_slice() != saved_response_hash {
-                error!("Response hash does not match the saved response hash.");
-                return Err(CoordinatorError::ContributionHashMismatch);
-            }
 
             next_challenge_hash
         };

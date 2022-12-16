@@ -230,7 +230,7 @@ mod tests {
         storage::{ContributionLocator, Locator, StorageObject},
         testing::prelude::*,
     };
-    use setup_utils::{blank_hash, calculate_hash, GenericArray};
+    use setup_utils::{calculate_hash, GenericArray};
 
     use tracing::{debug, trace};
 
@@ -261,23 +261,6 @@ mod tests {
             // Open the contribution locator file.
             let locator = Locator::ContributionFile(ContributionLocator::new(round_height, chunk_id, 0, true));
             let reader = storage.reader(&locator).unwrap();
-
-            // Check that the contribution chunk was generated based on the blank hash.
-            let hash = blank_hash();
-
-            debug!("blank hash is {}", pretty_hash!(&hash));
-            let challenge_hash = calculate_hash(&reader);
-            debug!("reader hash is {}", pretty_hash!(challenge_hash));
-            debug!("reader is {}", pretty_hash!(&reader[0..255]));
-            for (i, (expected, candidate)) in hash.iter().zip(reader.as_ref().chunks(64).next().unwrap()).enumerate() {
-                trace!(
-                    "Checking byte {} of expected hash: {:02x} =? {:02x}",
-                    i,
-                    expected,
-                    candidate
-                );
-                assert_eq!(expected, candidate);
-            }
 
             // If chunk ID is under (number_of_chunks / 2), the contribution hash
             // of each iteration will match with Groth16 and Marlin.

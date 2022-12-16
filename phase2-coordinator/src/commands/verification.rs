@@ -184,13 +184,10 @@ impl Verification {
                 storage.reader(&response_locator)?.as_ref(),
             ),
         };
-        let response_hash = match result {
-            Ok(response_hash) => response_hash,
-            Err(error) => {
-                error!("Verification failed with {}", error);
-                return Err(CoordinatorError::VerificationFailed.into());
-            }
-        };
+        if let Err(error) = result {
+            error!("Verification failed with {}", error);
+            return Err(CoordinatorError::VerificationFailed.into());
+        }
 
         trace!("Verification succeeded! Writing the next challenge file");
 
@@ -221,17 +218,14 @@ impl Verification {
                 CurveKind::Bls12_381 => Self::decompress(
                     storage.reader(&response_locator)?.as_ref(),
                     storage.writer(&next_challenge_locator)?.as_mut(),
-                    response_hash.as_ref(),
                 )?,
                 CurveKind::Bls12_377 => Self::decompress(
                     storage.reader(&response_locator)?.as_ref(),
                     storage.writer(&next_challenge_locator)?.as_mut(),
-                    response_hash.as_ref(),
                 )?,
                 CurveKind::BW6 => Self::decompress(
                     storage.reader(&response_locator)?.as_ref(),
                     storage.writer(&next_challenge_locator)?.as_mut(),
-                    response_hash.as_ref(),
                 )?,
             };
 
@@ -239,25 +233,6 @@ impl Verification {
         };
 
         debug!("The next challenge hash is {}", pretty_hash!(&next_challenge_hash));
-
-        {
-            // Fetch the saved response hash in the next challenge file.
-            let saved_response_hash = storage
-                .reader(&next_challenge_locator)?
-                .as_ref()
-                .chunks(64)
-                .next()
-                .unwrap()
-                .to_vec();
-
-            // Check that the response hash matches the next challenge hash.
-            debug!("The response hash is {}", pretty_hash!(&response_hash));
-            debug!("The saved response hash is {}", pretty_hash!(&saved_response_hash));
-            if response_hash.as_slice() != saved_response_hash {
-                error!("Response hash does not match the saved response hash.");
-                return Err(CoordinatorError::ContributionHashMismatch);
-            }
-        }
 
         Ok(())
     }
@@ -267,30 +242,6 @@ impl Verification {
         challenge_reader: &[u8],
         response_reader: &[u8],
     ) -> Result<GenericArray<u8, U64>, CoordinatorError> {
-        debug!("Verifying challenges");
-
-        // Check that the challenge hashes match.
-        let _challenge_hash = {
-            // Compute the challenge hash using the challenge file.
-            let challenge_hash = calculate_hash(challenge_reader.as_ref());
-
-            // Fetch the challenge hash from the response file.
-            let saved_challenge_hash = &response_reader
-                .get(0..64)
-                .ok_or(CoordinatorError::StorageReaderFailed)?[..];
-
-            // Check that the challenge hashes match.
-            debug!("The challenge hash is {}", pretty_hash!(&challenge_hash));
-            debug!("The saved challenge hash is {}", pretty_hash!(&saved_challenge_hash));
-            match challenge_hash.as_slice() == saved_challenge_hash {
-                true => challenge_hash,
-                false => {
-                    error!("Challenge hash does not match saved challenge hash.");
-                    return Err(CoordinatorError::ContributionHashMismatch);
-                }
-            }
-        };
-
         // Compute the response hash using the response file.
         let response_hash = calculate_hash(response_reader);
         debug!("Response Reader hash is {}", pretty_hash!(&response_hash));
@@ -304,10 +255,10 @@ impl Verification {
         trace!("Starting verification");
 
         #[cfg(debug_assertions)]
-        Self::verify_test_masp(&challenge_reader, &response_reader);
+        Self::verify_test_masp(challenge_reader, response_reader);
 
         #[cfg(not(debug_assertions))]
-        Self::verify_masp(&challenge_reader, &response_reader);
+        Self::verify_masp(challenge_reader, response_reader);
 
         trace!("Completed verification");
 
@@ -318,31 +269,27 @@ impl Verification {
     #[cfg(not(debug_assertions))]
     fn verify_masp(challenge_reader: &[u8], response_reader: &[u8]) {
         trace!("Reading MASP Spend old parameters...");
-        let mut masp_challenge_reader = &challenge_reader[64..];
-        let mut masp_response_reader = &response_reader[64..];
-
-        let masp_spend =
-            MPCParameters::read(&mut masp_challenge_reader, false).expect("couldn't deserialize MASP Spend params");
+        let masp_spend = MPCParameters::read(challenge_reader, false).expect("couldn't deserialize MASP Spend params");
 
         trace!("Reading MASP Output old parameters...");
         let masp_output =
-            MPCParameters::read(&mut masp_challenge_reader, false).expect("couldn't deserialize MASP Output params");
+            MPCParameters::read(challenge_reader, false).expect("couldn't deserialize MASP Output params");
 
         trace!("Reading MASP Convert old parameters...");
         let masp_convert =
-            MPCParameters::read(&mut masp_challenge_reader, false).expect("couldn't deserialize MASP Convert params");
+            MPCParameters::read(challenge_reader, false).expect("couldn't deserialize MASP Convert params");
 
         trace!("Reading MASP Spend new parameters...");
         let new_masp_spend =
-            MPCParameters::read(&mut masp_response_reader, true).expect("couldn't deserialize MASP Spend new_params");
+            MPCParameters::read(response_reader, true).expect("couldn't deserialize MASP Spend new_params");
 
         trace!("Reading MASP Output new parameters...");
         let new_masp_output =
-            MPCParameters::read(&mut masp_response_reader, true).expect("couldn't deserialize MASP Output new_params");
+            MPCParameters::read(response_reader, true).expect("couldn't deserialize MASP Output new_params");
 
         trace!("Reading MASP Convert new parameters...");
         let new_masp_convert =
-            MPCParameters::read(&mut masp_response_reader, true).expect("couldn't deserialize MASP Convert new_params");
+            MPCParameters::read(response_reader, true).expect("couldn't deserialize MASP Convert new_params");
 
         trace!("Verifying MASP Spend...");
         let spend_hash = match verify_contribution(&masp_spend, &new_masp_spend) {
@@ -378,11 +325,10 @@ impl Verification {
     #[inline]
     #[cfg(debug_assertions)]
     fn verify_test_masp(challenge_reader: &[u8], response_reader: &[u8]) {
-        let masp_test =
-            MPCParameters::read(&challenge_reader[64..], false).expect("couldn't deserialize MASP Test params");
+        let masp_test = MPCParameters::read(challenge_reader, false).expect("couldn't deserialize MASP Test params");
 
         let new_masp_test =
-            MPCParameters::read(&response_reader[64..], true).expect("couldn't deserialize MASP Spend new_params");
+            MPCParameters::read(response_reader, true).expect("couldn't deserialize MASP Spend new_params");
 
         let test_hash = match verify_contribution(&masp_test, &new_masp_test) {
             Ok(hash) => hash,
@@ -397,14 +343,9 @@ impl Verification {
     }
 
     #[inline]
-    fn decompress(
-        response_reader: &[u8],
-        mut next_challenge_writer: &mut [u8],
-        response_hash: &[u8],
-    ) -> Result<(), CoordinatorError> {
-        // Copies hash of previous response to the new challenge locator, then adds the parameters
-        (&mut next_challenge_writer[0..]).write_all(response_hash)?;
-        (&mut next_challenge_writer[64..]).write_all(&response_reader[64..])?;
+    fn decompress(response_reader: &[u8], mut next_challenge_writer: &mut [u8]) -> Result<(), CoordinatorError> {
+        // Adds parameters to the new challenge locator
+        next_challenge_writer.write_all(response_reader)?;
 
         Ok(next_challenge_writer.flush()?)
     }
